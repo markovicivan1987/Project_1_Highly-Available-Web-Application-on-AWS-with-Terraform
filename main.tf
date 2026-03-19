@@ -272,6 +272,26 @@ resource "aws_lb_listener" "http" {
   protocol          = "HTTP"
 
   default_action {
+    type = "redirect"
+    redirect {
+      port        = "443"
+      protocol    = "HTTPS"
+      status_code = "HTTP_301"
+    }
+
+    #type             = "forward"
+    #target_group_arn = aws_lb_target_group.web_tg.arn
+  }
+}
+
+resource "aws_lb_listener" "https" {
+  load_balancer_arn = aws_lb.web_alb.arn
+  port              = 443
+  protocol          = "HTTPS"
+  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  certificate_arn   = aws_acm_certificate.self_signed.arn
+
+  default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.web_tg.arn
   }
@@ -304,9 +324,9 @@ EOF
 
 resource "aws_autoscaling_group" "web_asg" {
   name                      = "project1-web-asg"
-  min_size                  = 2
+  min_size                  = 1
   max_size                  = 2
-  desired_capacity          = 2
+  desired_capacity          = 1
   vpc_zone_identifier       = [aws_subnet.private_a.id, aws_subnet.private_b.id]
   launch_template {
     id      = aws_launch_template.web_lt.id
