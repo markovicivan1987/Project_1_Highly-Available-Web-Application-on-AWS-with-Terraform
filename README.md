@@ -15,6 +15,8 @@ Security Groups: For ALB and EC2 instances, following least privilege.
 
 Architecture Diagram
 
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/4593f954-07a0-49fb-b196-f99064a08d61" />
+
 
 Features
 Highly available and scalable web application infrastructure
