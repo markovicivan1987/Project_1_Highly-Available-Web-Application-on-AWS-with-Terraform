@@ -1,7 +1,4 @@
-provider "aws" {
-  region = "us-east-1"
-}
-
+# VPC and Networking
 resource "aws_vpc" "main" {
   cidr_block = "10.0.0.0/16"
   tags       = { Name = "project_1-main-vpc" }
@@ -42,21 +39,18 @@ resource "aws_subnet" "private_b" {
   tags              = { Name = "project_1-private-b" }
 }
 
-
-# Public Route Table
+# Route Tables and Associations
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
   tags   = { Name = "project_1-public-rt" }
 }
 
-# Route: Public subnets to Internet Gateway
 resource "aws_route" "public_internet_access" {
   route_table_id         = aws_route_table.public.id
   destination_cidr_block = "0.0.0.0/0"
   gateway_id             = aws_internet_gateway.gw.id
 }
 
-# Associate public subnets with the public route table
 resource "aws_route_table_association" "public_a" {
   subnet_id      = aws_subnet.public_a.id
   route_table_id = aws_route_table.public.id
@@ -67,33 +61,28 @@ resource "aws_route_table_association" "public_b" {
   route_table_id = aws_route_table.public.id
 }
 
-# Elastic IP for NAT Gateway
 resource "aws_eip" "nat" {
   domain = "vpc"
-  tags = { Name = "project_1-nat-eip" }
+  tags   = { Name = "project_1-nat-eip" }
 }
 
-# NAT Gateway in public_a subnet
 resource "aws_nat_gateway" "gw" {
   allocation_id = aws_eip.nat.id
   subnet_id     = aws_subnet.public_a.id
   tags          = { Name = "project_1-nat-gw" }
 }
 
-# Private Route Table
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
   tags   = { Name = "project_1-private-rt" }
 }
 
-# Route: Private subnets to NAT Gateway
 resource "aws_route" "private_nat_gateway" {
   route_table_id         = aws_route_table.private.id
   destination_cidr_block = "0.0.0.0/0"
   nat_gateway_id         = aws_nat_gateway.gw.id
 }
 
-# Associate private subnets with the private route table
 resource "aws_route_table_association" "private_a" {
   subnet_id      = aws_subnet.private_a.id
   route_table_id = aws_route_table.private.id
@@ -104,8 +93,10 @@ resource "aws_route_table_association" "private_b" {
   route_table_id = aws_route_table.private.id
 }
 
+# Security Groups
 resource "aws_security_group" "bastion_sg" {
-  name        = "project_1-bastion-sg"
+ 
+ name        = "project_1-bastion-sg"
   description = "Allow SSH from my IP"
   vpc_id      = aws_vpc.main.id
 
@@ -113,7 +104,7 @@ resource "aws_security_group" "bastion_sg" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = ["79.140.146.126/32"]
+    cidr_blocks = [var.my_ip]
     description = "Allow SSH from my IP"
   }
 
@@ -127,25 +118,6 @@ resource "aws_security_group" "bastion_sg" {
   tags = { Name = "project_1-bastion-sg" }
 }
 
-resource "aws_instance" "bastion" {
-  ami                         = data.aws_ami.amazon_linux.id
-  instance_type               = "t3.micro"
-  subnet_id                   = aws_subnet.public_a.id
-  vpc_security_group_ids      = [aws_security_group.bastion_sg.id]
-  associate_public_ip_address = true
-  key_name                    = "key_MY_project1"
-
-  tags = {
-    Name = "project_1-bastion"
-  }
-}
-
-output "bastion_public_ip" {
-  description = "Public IP of the bastion host"
-  value       = aws_instance.bastion.public_ip
-}
-
-# Security Group for ALB
 resource "aws_security_group" "alb_sg" {
   name        = "project_1-alb-sg"
   description = "Allow HTTP and HTTPS from anywhere"
@@ -167,7 +139,6 @@ resource "aws_security_group" "alb_sg" {
     description = "Allow inbound HTTPS from internet"
   }
 
-  # explicit egress controls (more restrictive alternatives)
   egress {
     from_port   = 53
     to_port     = 53
@@ -195,10 +166,9 @@ resource "aws_security_group" "alb_sg" {
   tags = { Name = "project_1-alb-sg" }
 }
 
-# Security Group for EC2 Web Servers
 resource "aws_security_group" "web_sg" {
   name        = "project_1-web-sg"
-  description = "Allow HTTP/HTTPS from ALB only"
+  description = "Allow HTTP/HTTPS from ALB only and SSH from bastion"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -217,7 +187,7 @@ resource "aws_security_group" "web_sg" {
     description     = "Allow HTTPS from ALB"
   }
 
- ingress {
+  ingress {
     from_port       = 22
     to_port         = 22
     protocol        = "tcp"
@@ -252,7 +222,21 @@ resource "aws_security_group" "web_sg" {
   tags = { Name = "project_1-web-sg" }
 }
 
+# Bastion Host
+resource "aws_instance" "bastion" {
+  ami                         = data.aws_ami.amazon_linux.id
+  instance_type               = "t3.micro"
+  subnet_id                   = aws_subnet.public_a.id
+  vpc_security_group_ids      = [aws_security_group.bastion_sg.id]
+  associate_public_ip_address = true
+  key_name                    = var.key_name
 
+  tags = {
+    Name = "project_1-bastion"
+  }
+}
+
+# ALB and Target Group
 resource "aws_lb_target_group" "web_tg" {
   name     = "project1-web-tg"
   port     = 80
@@ -293,27 +277,13 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-output "alb_dns_name" {
-  description = "The DNS name of the Application Load Balancer"
-  value       = aws_lb.web_alb.dns_name
-}
-
-
-data "aws_ami" "amazon_linux" {
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
-  }
-}
+# Launch Template and ASG
 
 resource "aws_launch_template" "web_lt" {
   name_prefix   = "project1-web-lt-"
   image_id      = data.aws_ami.amazon_linux.id
   instance_type = "t3.micro"
-  key_name      = "key_MY_project1" #  SSH key
+  key_name      = var.key_name
 
   network_interfaces {
     security_groups = [aws_security_group.web_sg.id]
